@@ -7,7 +7,10 @@ pub trait Renderer {
     fn new() -> Self;
 
     fn init(&mut self);
+    fn kill(&mut self);
     fn plot(&self, x: i32, y: i32, chr: char);
+
+    fn erase(&self);
 
     fn getch(&self) -> Option<Input>;
 
