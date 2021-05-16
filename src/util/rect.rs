@@ -7,14 +7,14 @@ pub struct Rect {
 
 impl Rect {
     pub fn area(&self) -> i32 {
-        w * h
+        self.w * self.h
     }
 
     pub fn max_x(&self) -> i32 {
-        x + w
+        self.x + self.w
     }
 
     pub fn max_y(&self) -> i32 {
-        y + h
+        self.y + self.h
     }
 }
