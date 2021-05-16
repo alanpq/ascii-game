@@ -1,9 +1,20 @@
 use crate::renderer::Renderer;
-use pancurses::{ALL_MOUSE_EVENTS, Window, endwin, newwin, getmouse, initscr, mousemask, Input, resize_term, REPORT_MOUSE_POSITION, ToChtype, Attribute, curs_set, cbreak, noecho, chtype, mouseinterval};
+use pancurses::{ALL_MOUSE_EVENTS, Window, endwin, newwin, getmouse, initscr, mousemask, Input, resize_term, REPORT_MOUSE_POSITION, ToChtype, Attribute, curs_set, cbreak, noecho, chtype, mouseinterval, has_colors, start_color, init_pair, COLOR_BLACK, COLOR_RED, COLOR_BLUE, COLOR_GREEN, COLOR_CYAN, COLOR_MAGENTA, COLOR_YELLOW, COLOR_WHITE};
 
 pub struct CursesRenderer {
     pub window: Window,
 }
+
+const COLOR_TABLE: [i16; 8] = [
+    COLOR_RED,
+    COLOR_BLUE,
+    COLOR_GREEN,
+    COLOR_CYAN,
+    COLOR_RED,
+    COLOR_MAGENTA,
+    COLOR_YELLOW,
+    COLOR_WHITE,
+];
 
 impl Renderer for CursesRenderer {
     fn new() -> CursesRenderer {
@@ -12,12 +23,27 @@ impl Renderer for CursesRenderer {
         }
     }
 
+    fn dimensions(&self) -> (i32, i32) {
+        (self.window.get_max_x(), self.window.get_max_y())
+    }
+
     fn init(&mut self) {
         cbreak();
         noecho();
         curs_set(0);
 
+        if has_colors() {
+            start_color();
+        }
+
+        for (i, color) in COLOR_TABLE.iter().enumerate() {
+            init_pair(i as i16, COLOR_BLACK, *color);
+        }
+        init_pair(8, COLOR_WHITE, COLOR_BLACK);
+
         mouseinterval(0); // disable click resolution (that shit smells)
+
+        resize_term(0, 0);
 
         self.window.nodelay(true);
         self.window.keypad(true); // Set keypad mode
@@ -28,7 +54,8 @@ impl Renderer for CursesRenderer {
         endwin();
     }
 
-    fn plot(&self, x: i32, y: i32, chr: char) {
+    fn plot<T: ToChtype>(&self, x: i32, y: i32, chr: T) {
+        if x < 0 || y < 0 { return; }
         self.window.mvaddch(y, x, chr);
     }
 

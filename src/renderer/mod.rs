@@ -6,9 +6,11 @@ use pancurses::{ToChtype, Window, chtype, Input};
 pub trait Renderer {
     fn new() -> Self;
 
+    fn dimensions(&self) -> (i32, i32);
+
     fn init(&mut self);
     fn kill(&mut self);
-    fn plot(&self, x: i32, y: i32, chr: char);
+    fn plot<T: ToChtype>(&self, x: i32, y: i32, chr: T);
 
     fn erase(&self);
 
