@@ -1,12 +1,6 @@
-[package]
-name = "ascii-game"
-version = "0.0.1"
-authors = ["Alan Panayotov <alanpanayotov@gmail.com>"]
-edition = "2018"
-
-[dependencies]
-rand = "0.8.1"
-num-integer = "0.1"
-
-[dependencies.pancurses]
-version = "0.16"
+[workspace]
+members = [
+    "client",
+    "server",
+    "shared"
+]
