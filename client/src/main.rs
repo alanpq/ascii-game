@@ -6,7 +6,6 @@ extern crate pancurses;
 extern crate num_integer;
 
 pub mod renderer;
-pub mod game;
 pub mod util;
 
 mod app;

@@ -1,15 +1,22 @@
 use std::collections::HashMap;
-use rand;
+use nanoserde::{DeBin, SerBin};
 
-pub const CHUNK_SIZE: usize = 50;
+use rand::{SeedableRng, RngCore};
+use rand::rngs::{SmallRng};
+use std::rc::{Rc};
+use std::cell::{RefCell};
+
+pub const CHUNK_SIZE: usize = 32;
 pub const CHUNK_SIZE_I32: i32 = CHUNK_SIZE as i32;
 
 #[derive(Copy, Clone)]
+#[derive(PartialEq, DeBin, SerBin)]
 pub enum Tile {
     Air,
     Wall
 }
 
+#[derive(PartialEq, DeBin)]
 pub struct Chunk {
     pub tiles: [[Tile; CHUNK_SIZE]; CHUNK_SIZE],
 }
@@ -21,10 +28,10 @@ impl Chunk {
         }
     }
 
-    pub fn generate(&mut self) {
+    pub fn generate(&mut self, rng: Rc<RefCell<SmallRng>>) {
         for x in 0..CHUNK_SIZE {
             for y in 0..CHUNK_SIZE {
-                if rand::random() {
+                if rng.borrow_mut().next_u32() < 2147483647 {
                     self.tiles[x][y] = Tile::Wall;
                 }
             }
@@ -33,14 +40,23 @@ impl Chunk {
 }
 
 pub struct Map {
+    pub seed: u64,
     chunks: HashMap<(i32, i32), Chunk>,
+    rng: Rc<RefCell<SmallRng>>,
 }
 
 impl Map {
-    pub fn new() -> Map {
+    pub fn new(seed: u64) -> Map {
         Map {
+            seed,
             chunks: HashMap::new(),
+            rng: Rc::new(RefCell::new(SeedableRng::seed_from_u64(seed))),
         }
+    }
+
+    pub fn default() -> Map {
+        let seed = rand::random();
+        Self::new(seed)
     }
 
     pub fn get_chunk(&self, x: i32, y: i32) -> Option<&Chunk> {
@@ -48,9 +64,10 @@ impl Map {
     }
 
     pub fn get_chunk_or_create(&mut self, x: i32, y: i32) -> &Chunk {
+        let rng = self.rng.clone();
         self.chunks.entry((x,y)).or_insert_with(|| {
             let mut chunk = Chunk::new();
-            chunk.generate();
+            chunk.generate(rng);
             chunk
         })
     }

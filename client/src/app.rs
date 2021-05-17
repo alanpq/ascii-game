@@ -2,8 +2,6 @@ use pancurses::{ALL_MOUSE_EVENTS, Window, endwin, newwin, getmouse, initscr, mou
 use crate::renderer::curses::CursesRenderer;
 use crate::renderer::{Renderer, drawer::Drawer};
 
-use crate::game::map::Map;
-use crate::game::map::{CHUNK_SIZE, CHUNK_SIZE_I32, Tile};
 use num_integer::Integer;
 use crate::util::fps::FpsCounter;
 
@@ -20,6 +18,8 @@ use ascii_game_shared::{
     get_shared_config, manifest_load, shared_behaviour, AuthEvent, Actors, Events,
     KeyCommand, PointActorColor,
 };
+use ascii_game_shared::game::map::Map;
+use ascii_game_shared::game::map::{CHUNK_SIZE, CHUNK_SIZE_I32, Tile};
 use std::collections::HashMap;
 
 const SERVER_PORT: u16 = 14191;
@@ -28,6 +28,10 @@ pub struct App {
     client: NaiaClient<Events, Actors>,
     pawn_key: Option<u16>,
     queued_command: Option<KeyCommand>,
+
+    map: Option<Map>,
+    player_x: i32,
+    player_y: i32,
 
     ss: (i32, i32),
     fps_counter: FpsCounter,
@@ -62,6 +66,10 @@ impl App {
             client,
             pawn_key: None,
             queued_command: None,
+
+            map: None,
+            player_x: 0,
+            player_y: 0,
 
             ss: renderer.dimensions(),
             fps_counter: FpsCounter::new(),
@@ -124,8 +132,17 @@ impl App {
                         self.pawn_key = None;
                         println!("unassign pawn");
                     }
-                    ClientEvent::UpdateActor(key) => {
-                        println!("got actor update for key {}", key);
+                    ClientEvent::CreateActor(actor_key) => {
+                        if let Some(actor) = self.client.get_actor(&actor_key) {
+                            match actor {
+                                Actors::WorldActor(world_actor) => {
+                                    println!("got world update at key {}", actor_key);
+                                    self.map = Some(Map::new(*(world_actor.as_ref().borrow().seed.get())));
+                                    println!("new seed: {}", self.map.as_ref().unwrap().seed);
+                                },
+                                _ => {}
+                            }
+                        }
                     }
                     ClientEvent::Tick => {
                         if let Some(pawn_key) = self.pawn_key {
@@ -134,19 +151,20 @@ impl App {
                             }
                         }
                     }
-                    ClientEvent::Command(pawn_key, command_type) => match command_type {
-                        Events::KeyCommand(key_command) => {
+                    ClientEvent::Command(pawn_key, command_type) => {
+                        if let Events::KeyCommand(key_command) = command_type {
                             if let Some(typed_actor) = self.client.get_pawn_mut(&pawn_key) {
                                 println!("{}", pawn_key);
                                 match typed_actor {
                                     Actors::PointActor(actor) => {
                                         shared_behaviour::process_command(&key_command, actor);
-                                    }
+                                        self.player_x = *(actor.as_ref().borrow().x.get());
+                                        self.player_y = *(actor.as_ref().borrow().y.get());
+                                    },
+                                    _ => {}
                                 }
                             }
-                            println!("command received for key {}", pawn_key);
                         }
-                        _ => {}
                     },
                     _ => {},
                 },
@@ -157,32 +175,69 @@ impl App {
         }
 
         if self.client.has_connection() {
-            for actor_key in self.client.actor_keys().unwrap() {
-                if actor_key == self.pawn_key.unwrap_or(0) {continue;}
-                if let Some(actor) = self.client.get_actor(&actor_key) {
-                    match actor {
-                        Actors::PointActor(point_actor) => {
-                            renderer.plot(*(point_actor.as_ref().borrow().x.get()), *(point_actor.as_ref().borrow().y.get()), 'O');
-                            println!("{}", *(point_actor.as_ref().borrow().x.get()));
-                        }
-                    }
-                }
-            }
+            let center_x = self.ss.0.div_floor(&2);
+            let center_y = self.ss.1.div_floor(&2);
 
-            for pawn_key in self.client.pawn_keys().unwrap() {
-                if let Some(actor) = self.client.get_pawn(&pawn_key) {
-                    match actor {
-                        Actors::PointActor(point_actor) => {
-                            renderer.plot(*(point_actor.as_ref().borrow().x.get()), *(point_actor.as_ref().borrow().y.get()), '@');
-                        }
-                    }
-                }
-            }
+            let cam_off_x = self.player_x - center_x;
+            let cam_off_y = self.player_y - center_y;
+
+            self.draw_map(renderer, cam_off_x, cam_off_y);
+
+            renderer.attrset(COLOR_PAIR(7));
+            renderer.plot(center_x, center_y, '@' as chtype);
+
+            self.draw_others(renderer, cam_off_x, cam_off_y);
         } else {
             renderer.mvaddstr(self.ss.0/2,self.ss.1/2,"NOT CONNECTED");
         }
 
         renderer.mvaddstr(0, 0, format!("frametime: {} ({} fps)", frame_time, 1.0/frame_time));
         renderer.mvaddstr(1, 0, format!("{},{}", self.ss.0, self.ss.1));
+    }
+
+    fn draw_map<T: Renderer>(&mut self, renderer: &mut T, cam_off_x: i32, cam_off_y: i32) {
+        if let Some(map) = &mut self.map {
+            let start_x = cam_off_x.div_floor(&CHUNK_SIZE_I32);
+            let start_y = cam_off_y.div_floor(&CHUNK_SIZE_I32);
+
+            for i in start_x..start_x + self.ss.0.div_ceil(&CHUNK_SIZE_I32) + 1 {
+                for j in start_y..start_y + self.ss.1.div_ceil(&CHUNK_SIZE_I32) + 1 {
+                    let chunk = map.get_chunk_or_create(i, j);
+                    for x in 0..CHUNK_SIZE {
+                        for y in 0..CHUNK_SIZE {
+                            let tile = &chunk.tiles[x][y];
+                            let chr;
+                            match tile {
+                                Tile::Air => {
+                                    chr = ' ';
+                                    renderer.attrset(COLOR_PAIR(8));
+                                },
+                                Tile::Wall => {
+                                    chr = ' ';
+                                    renderer.attrset(COLOR_PAIR(2));
+                                },
+                            }
+                            renderer.plot(i * CHUNK_SIZE_I32 + x as i32 - cam_off_x, j * CHUNK_SIZE_I32 + y as i32 - cam_off_y, chr);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn draw_others<T: Renderer>(&mut self, renderer: &mut T, cam_off_x: i32, cam_off_y: i32) {
+        for actor_key in self.client.actor_keys().unwrap() {
+            if actor_key == self.pawn_key.unwrap_or(0) { continue; }
+            if let Some(actor) = self.client.get_actor(&actor_key) {
+                match actor {
+                    Actors::PointActor(point_actor) => {
+                        let x = *(point_actor.as_ref().borrow().x.get());
+                        let y = *(point_actor.as_ref().borrow().y.get());
+                        renderer.plot(x - cam_off_x, y - cam_off_y, 'O');
+                    },
+                    _ => {}
+                }
+            }
+        }
     }
 }

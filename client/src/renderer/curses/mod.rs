@@ -87,6 +87,10 @@ impl Renderer for CursesRenderer {
         self.window.mvprintw(y, x, string)
     }
 
+    fn attrset<T: Into<chtype>>(&self, attributes: T) {
+        self.window.attrset(attributes);
+    }
+
     fn refresh(&self) -> i32 {
         self.window.refresh()
     }

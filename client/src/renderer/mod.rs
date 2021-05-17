@@ -24,5 +24,8 @@ pub trait Renderer {
     fn mvinch(&self, y: i32, x: i32) -> chtype;
     fn mvprintw<T: AsRef<str>>(&self, y: i32, x: i32, string: T) -> i32;
 
+    // BOTCH JOB INCOMING
+    fn attrset<T: Into<chtype>>(&self, attributes: T);
+
     fn refresh(&self) -> i32;
 }

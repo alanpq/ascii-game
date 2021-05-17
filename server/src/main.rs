@@ -13,9 +13,10 @@ use smol::io;
 use naia_server::{ActorKey, NaiaServer, ServerAddresses, Random, ServerConfig, ServerEvent, UserKey};
 use log::LevelFilter;
 use ascii_game_shared::{
-    get_shared_config, manifest_load, PointActor, Events, Actors, shared_behaviour,
+    get_shared_config, manifest_load, PointActor, WorldActor, Events, Actors, shared_behaviour,
     PointActorColor
 };
+use ascii_game_shared::game::map::Map;
 
 fn main() -> io::Result<()> {
     let server_addresses: ServerAddresses = ServerAddresses::new(
@@ -65,10 +66,22 @@ fn main() -> io::Result<()> {
         server.on_scope_actor(Rc::new(Box::new(|_, _, _, actor| match actor {
             Actors::PointActor(_) => {
                 return true;
+            },
+            Actors::WorldActor(_) => {
+                return true;
             }
         })));
 
         let mut user_to_pawn_map = HashMap::<UserKey, ActorKey>::new();
+
+        let mut map = Map::default();
+        let world = WorldActor::new(map.seed).wrap();
+
+        let world_key = server
+            .register_actor(Actors::WorldActor(world.clone()));
+        server.room_add_actor(&main_room_key, &world_key);
+        info!("Created world actor.");
+        info!("Seed: {}", map.seed);
 
         loop {
             match server.receive().await {
@@ -113,7 +126,8 @@ fn main() -> io::Result<()> {
                                     match typed_actor {
                                         Actors::PointActor(actor) => {
                                             shared_behaviour::process_command(&key_command, actor);
-                                        }
+                                        },
+                                        _ => {}
                                     }
                                 }
                             }
