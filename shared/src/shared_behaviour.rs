@@ -2,8 +2,6 @@ use std::{cell::RefCell, rc::Rc};
 
 use crate::{KeyCommand, PointActor};
 
-const SQUARE_SPEED: i32 = 8;
-
 pub fn process_command(key_command: &KeyCommand, point_actor: &Rc<RefCell<PointActor>>) {
     let old_x: i32;
     let old_y: i32;
@@ -16,24 +14,24 @@ pub fn process_command(key_command: &KeyCommand, point_actor: &Rc<RefCell<PointA
         point_actor
             .borrow_mut()
             .y
-            .set(old_y.wrapping_sub(SQUARE_SPEED))
+            .set(old_y.wrapping_sub(1))
     }
     if *key_command.s.get() {
         point_actor
             .borrow_mut()
             .y
-            .set(old_y.wrapping_add(SQUARE_SPEED))
+            .set(old_y.wrapping_add(1))
     }
     if *key_command.a.get() {
         point_actor
             .borrow_mut()
             .x
-            .set(old_x.wrapping_sub(SQUARE_SPEED))
+            .set(old_x.wrapping_sub(1))
     }
     if *key_command.d.get() {
         point_actor
             .borrow_mut()
             .x
-            .set(old_x.wrapping_add(SQUARE_SPEED))
+            .set(old_x.wrapping_add(1))
     }
 }

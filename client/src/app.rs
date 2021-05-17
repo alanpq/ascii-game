@@ -20,6 +20,7 @@ use ascii_game_shared::{
     get_shared_config, manifest_load, shared_behaviour, AuthEvent, Actors, Events,
     KeyCommand, PointActorColor,
 };
+use std::collections::HashMap;
 
 const SERVER_PORT: u16 = 14191;
 
@@ -30,11 +31,12 @@ pub struct App {
 
     ss: (i32, i32),
     fps_counter: FpsCounter,
+    paused: bool,
 }
 
 impl App {
     pub fn new<T: Renderer>(renderer: &T) -> Self {
-        info!("Naia Macroquad Client Example Started");
+        println!("Naia Macroquad Client Example Started");
 
         // Put your Server's IP Address here!, can't easily find this automatically from the browser
         let server_ip_address: IpAddr = "192.168.1.16"
@@ -63,6 +65,7 @@ impl App {
 
             ss: renderer.dimensions(),
             fps_counter: FpsCounter::new(),
+            paused: false,
         }
     }
 
@@ -73,6 +76,34 @@ impl App {
                 resize_term(0, 0); // TODO: abstract this away
                 self.ss = renderer.dimensions();
             },
+            Some(Input::Character(chr)) => {
+                println!("chr {} -> {}",chr, chr as u32);
+                let mut w = false;
+                let mut s = false;
+                let mut a = false;
+                let mut d = false;
+                match chr as u32 {
+                    27 => { // escape
+                        self.paused = !self.paused;
+                    },
+                    119 => { // w
+                        w = true;
+                    },
+                    115 => { // s
+                        s = true;
+                    },
+                    97 => { // a
+                        a = true;
+                    },
+                    100 => { // d
+                        d = true;
+                    },
+                    _ => {},
+                }
+                if w || s || a || d {
+                    self.queued_command = Some(KeyCommand::new(w,s,a,d));
+                }
+            },
             _ => {}
         }
 
@@ -80,18 +111,21 @@ impl App {
             match result {
                 Ok(event) => match event {
                     ClientEvent::Connection => {
-                        info!("Connected to {}", self.client.server_address());
+                        println!("Connected to {}", self.client.server_address());
                     },
                     ClientEvent::Disconnection => {
-                        info!("Disconnected from {}", self.client.server_address());
+                        println!("Disconnected from {}", self.client.server_address());
                     }
                     ClientEvent::AssignPawn(local_key) => {
                         self.pawn_key = Some(local_key);
-                        info!("assign pawn");
+                        println!("assign pawn");
                     }
                     ClientEvent::UnassignPawn(_) => {
                         self.pawn_key = None;
-                        info!("unassign pawn");
+                        println!("unassign pawn");
+                    }
+                    ClientEvent::UpdateActor(key) => {
+                        println!("got actor update for key {}", key);
                     }
                     ClientEvent::Tick => {
                         if let Some(pawn_key) = self.pawn_key {
@@ -103,30 +137,33 @@ impl App {
                     ClientEvent::Command(pawn_key, command_type) => match command_type {
                         Events::KeyCommand(key_command) => {
                             if let Some(typed_actor) = self.client.get_pawn_mut(&pawn_key) {
+                                println!("{}", pawn_key);
                                 match typed_actor {
                                     Actors::PointActor(actor) => {
                                         shared_behaviour::process_command(&key_command, actor);
                                     }
                                 }
                             }
+                            println!("command received for key {}", pawn_key);
                         }
                         _ => {}
                     },
                     _ => {},
                 },
                 Err(err) => {
-                    info!("Client Error: {}", err);
+                    println!("Client Error: {}", err);
                 }
             }
         }
 
         if self.client.has_connection() {
             for actor_key in self.client.actor_keys().unwrap() {
+                if actor_key == self.pawn_key.unwrap_or(0) {continue;}
                 if let Some(actor) = self.client.get_actor(&actor_key) {
                     match actor {
                         Actors::PointActor(point_actor) => {
                             renderer.plot(*(point_actor.as_ref().borrow().x.get()), *(point_actor.as_ref().borrow().y.get()), 'O');
-                            info!("{}", *(point_actor.as_ref().borrow().x.get()));
+                            println!("{}", *(point_actor.as_ref().borrow().x.get()));
                         }
                     }
                 }
