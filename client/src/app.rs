@@ -25,8 +25,16 @@ use std::collections::HashMap;
 use std::borrow::BorrowMut;
 use std::cell::RefCell;
 use std::net::ToSocketAddrs;
+use std::io::empty;
+use bitflags::_core::ops::Not;
 
 const SERVER_PORT: u16 = 14191;
+
+bitflags! {
+    struct DebugFlags: u32 {
+        const KEY = 0b00000001;
+    }
+}
 
 pub struct App {
     client: Option<NaiaClient<Events, Actors>>,
@@ -46,6 +54,8 @@ pub struct App {
     menu_unpress: bool,
     menu_text: String,
 
+    debug_keys: DebugFlags,
+
     ip: String,
 
     ss: (i32, i32),
@@ -55,7 +65,7 @@ pub struct App {
 
 impl App {
     pub fn new<T: Renderer>(renderer: &T) -> Self {
-        println!("Naia Macroquad Client Example Started");
+        info!("Naia Macroquad Client Example Started");
 
         App {
             client: None,
@@ -74,6 +84,8 @@ impl App {
             menu_press: false,
             menu_unpress: false,
             menu_text: String::new(),
+
+            debug_keys: DebugFlags::KEY.not(),
 
             ip: String::new(),
 
@@ -97,7 +109,7 @@ impl App {
                 return;
             }
         }
-        println!("{}", final_ip);
+        info!("{}", final_ip);
         let server_socket_address = final_ip
             .to_socket_addrs()
             .expect("couldn't parse input IP address").next().expect("still couldn't parse hostname");
@@ -125,7 +137,9 @@ impl App {
                 self.ss = renderer.dimensions();
             },
             Some(Input::Character(chr)) => {
-                println!("chr {} -> {}",chr, chr as u32);
+                if self.debug_keys & DebugFlags::KEY == DebugFlags::KEY {
+                    info!("chr {} -> {}", chr, chr as u32);
+                }
                 let mut w = false;
                 let mut s = false;
                 let mut a = false;
@@ -150,6 +164,9 @@ impl App {
                     100 => { // d
                         d = true;
                     },
+                    107 => {
+                        self.debug_keys.toggle(DebugFlags::KEY);
+                    },
                     32 => { // space
                         if self.menu_state != MenuState::Game && !self.menu_eaten {
                             self.menu_press = true;
@@ -160,14 +177,11 @@ impl App {
                             self.menu_press = true;
                         }
                     }
-                    _ => {
-                        println!("inp: {}", chr as u32);
-                    },
+                    _ => {},
                 }
                 if self.menu_state != MenuState::Game && !self.menu_eaten {
                     self.menu_idx = self.menu_idx.saturating_add(s as u8);
                     self.menu_idx = self.menu_idx.saturating_sub(w as u8);
-                    println!("{}", self.menu_idx);
                 }
                 if self.menu_eaten {
                     match chr as u32 {
@@ -195,32 +209,32 @@ impl App {
                 match result {
                     Ok(event) => match event {
                         ClientEvent::Connection => {
-                            println!("Connected to {}", client.server_address());
+                            info!("Connected to {}", client.server_address());
                             // self.change_menu(MenuState::Game);
                             self.menu_state = MenuState::Game;
                             self.menu_idx = 0;
                         },
                         ClientEvent::Disconnection => {
-                            println!("Disconnected from {}", client.server_address());
+                            info!("Disconnected from {}", client.server_address());
                             // self.change_menu(MenuState::Connect);
                             self.menu_state = MenuState::Connect;
                             self.menu_idx = 0;
                         }
                         ClientEvent::AssignPawn(local_key) => {
                             self.pawn_key = Some(local_key);
-                            println!("assign pawn");
+                            info!("assign pawn");
                         }
                         ClientEvent::UnassignPawn(_) => {
                             self.pawn_key = None;
-                            println!("unassign pawn");
+                            info!("unassign pawn");
                         }
                         ClientEvent::CreateActor(actor_key) => {
                             if let Some(actor) = client.get_actor(&actor_key) {
                                 match actor {
                                     Actors::WorldActor(world_actor) => {
-                                        println!("got world update at key {}", actor_key);
+                                        info!("got world update at key {}", actor_key);
                                         self.map = Some(Map::new(*(world_actor.as_ref().borrow().seed.get())));
-                                        println!("new seed: {}", self.map.as_ref().unwrap().seed);
+                                        info!("new seed: {}", self.map.as_ref().unwrap().seed);
                                     },
                                     _ => {}
                                 }
@@ -236,7 +250,6 @@ impl App {
                         ClientEvent::Command(pawn_key, command_type) => {
                             if let Events::KeyCommand(key_command) = command_type {
                                 if let Some(typed_actor) = client.get_pawn_mut(&pawn_key) {
-                                    println!("{}", pawn_key);
                                     match typed_actor {
                                         Actors::PointActor(actor) => {
                                             shared_behaviour::process_command(&key_command, actor);
@@ -251,7 +264,7 @@ impl App {
                         _ => {},
                     },
                     Err(err) => {
-                        println!("Client Error: {}", err);
+                        info!("Client Error: {}", err);
                     }
                 }
             }
