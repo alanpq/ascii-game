@@ -1,6 +1,6 @@
 use naia_shared::Manifest;
 
-use crate::{AuthEvent, Actors, Events, KeyCommand, actors::{PointActor, WorldActor}};
+use crate::{events::{AuthEvent, KeyCommand}, Actors, Events, actors::{PointActor, WorldActor}};
 
 pub fn manifest_load() -> Manifest<Events, Actors> {
     let mut manifest = Manifest::<Events, Actors>::new();

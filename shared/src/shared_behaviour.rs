@@ -1,6 +1,6 @@
 use std::{cell::RefCell, rc::Rc};
 
-use crate::{KeyCommand, actors::PointActor};
+use crate::{events::KeyCommand, actors::PointActor};
 
 pub fn process_command(key_command: &KeyCommand, point_actor: &Rc<RefCell<PointActor>>) {
     let old_x: i32;
