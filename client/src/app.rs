@@ -17,7 +17,7 @@ use naia_client::{ClientConfig, ClientEvent, NaiaClient};
 
 use ascii_game_shared::{
     get_shared_config, manifest_load, shared_behaviour, AuthEvent, Actors, Events,
-    KeyCommand, PointActorColor,
+    KeyCommand, actors::{PointActorColor},
 };
 use ascii_game_shared::game::map::Map;
 use ascii_game_shared::game::map::{CHUNK_SIZE, CHUNK_SIZE_I32, Tile};
