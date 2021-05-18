@@ -1,6 +1,7 @@
 use pancurses::{ALL_MOUSE_EVENTS, Window, endwin, newwin, getmouse, initscr, mousemask, Input, resize_term, REPORT_MOUSE_POSITION, ToChtype, Attribute, curs_set, cbreak, noecho, chtype, BUTTON1_RELEASED, COLOR_BLACK, COLOR_PAIR, COLOR_GREEN};
 use crate::renderer::curses::CursesRenderer;
 use crate::renderer::{Renderer, drawer::Drawer};
+use crate::ui::{MenuState};
 
 use num_integer::Integer;
 use crate::util::fps::FpsCounter;
@@ -21,17 +22,31 @@ use ascii_game_shared::{
 use ascii_game_shared::game::map::Map;
 use ascii_game_shared::game::map::{CHUNK_SIZE, CHUNK_SIZE_I32, Tile};
 use std::collections::HashMap;
+use std::borrow::BorrowMut;
+use std::cell::RefCell;
+use std::net::ToSocketAddrs;
 
 const SERVER_PORT: u16 = 14191;
 
 pub struct App {
-    client: NaiaClient<Events, Actors>,
+    client: Option<NaiaClient<Events, Actors>>,
     pawn_key: Option<u16>,
     queued_command: Option<KeyCommand>,
 
     map: Option<Map>,
     player_x: i32,
     player_y: i32,
+
+    menu_counter: u8,
+    menu_space: u8,
+    menu_state: MenuState,
+    menu_eaten: bool,
+    menu_idx: u8,
+    menu_press: bool,
+    menu_unpress: bool,
+    menu_text: String,
+
+    ip: String,
 
     ss: (i32, i32),
     fps_counter: FpsCounter,
@@ -42,12 +57,50 @@ impl App {
     pub fn new<T: Renderer>(renderer: &T) -> Self {
         println!("Naia Macroquad Client Example Started");
 
-        // Put your Server's IP Address here!, can't easily find this automatically from the browser
-        let server_ip_address: IpAddr = "192.168.1.16"
-            .parse()
-            .expect("couldn't parse input IP address");
-        let server_socket_address = SocketAddr::new(server_ip_address, SERVER_PORT);
+        App {
+            client: None,
+            pawn_key: None,
+            queued_command: None,
 
+            map: None,
+            player_x: 0,
+            player_y: 0,
+
+            menu_counter: 0,
+            menu_space: 0,
+            menu_state: MenuState::Main,
+            menu_eaten: false,
+            menu_idx: 0,
+            menu_press: false,
+            menu_unpress: false,
+            menu_text: String::new(),
+
+            ip: String::new(),
+
+            ss: renderer.dimensions(),
+            fps_counter: FpsCounter::new(),
+            paused: false,
+        }
+    }
+
+    pub fn connect<T: AsRef<str>>(&mut self, ip: T) {
+        let split = ip.as_ref().split(":");
+        let final_ip;
+        match split.count() {
+            1 => {
+                final_ip = format!("{}:{}",ip.as_ref(), SERVER_PORT)
+            },
+            2 => {
+                final_ip = ip.as_ref().to_string();
+            },
+            _ => {
+                return;
+            }
+        }
+        println!("{}", final_ip);
+        let server_socket_address = final_ip
+            .to_socket_addrs()
+            .expect("couldn't parse input IP address").next().expect("still couldn't parse hostname");
         let mut client_config = ClientConfig::default();
         client_config.heartbeat_interval = Duration::from_secs(2);
         client_config.disconnection_timeout_duration = Duration::from_secs(5);
@@ -61,20 +114,7 @@ impl App {
             get_shared_config(),
             Some(auth),
         );
-
-        App {
-            client,
-            pawn_key: None,
-            queued_command: None,
-
-            map: None,
-            player_x: 0,
-            player_y: 0,
-
-            ss: renderer.dimensions(),
-            fps_counter: FpsCounter::new(),
-            paused: false,
-        }
+        self.client = Some(client);
     }
 
     pub fn update<T: Renderer>(&mut self, renderer: &mut T) {
@@ -93,6 +133,10 @@ impl App {
                 match chr as u32 {
                     27 => { // escape
                         self.paused = !self.paused;
+                        if self.menu_eaten {
+                            self.menu_eaten = false;
+                            self.menu_unpress = true;
+                        }
                     },
                     119 => { // w
                         w = true;
@@ -106,7 +150,38 @@ impl App {
                     100 => { // d
                         d = true;
                     },
-                    _ => {},
+                    32 => { // space
+                        if self.menu_state != MenuState::Game && !self.menu_eaten {
+                            self.menu_press = true;
+                        }
+                    },
+                    10 => { // enter
+                        if self.menu_state != MenuState::Game && !self.menu_eaten {
+                            self.menu_press = true;
+                        }
+                    }
+                    _ => {
+                        println!("inp: {}", chr as u32);
+                    },
+                }
+                if self.menu_state != MenuState::Game && !self.menu_eaten {
+                    self.menu_idx = self.menu_idx.saturating_add(s as u8);
+                    self.menu_idx = self.menu_idx.saturating_sub(w as u8);
+                    println!("{}", self.menu_idx);
+                }
+                if self.menu_eaten {
+                    match chr as u32 {
+                        8 => { // backspace
+                            self.menu_text.pop();
+                        }
+                        10 => { // enter
+                            self.menu_eaten = false;
+                            self.menu_unpress = true;
+                        }
+                        _ => {
+                            self.menu_text.push(chr);
+                        }
+                    }
                 }
                 if w || s || a || d {
                     self.queued_command = Some(KeyCommand::new(w,s,a,d));
@@ -115,84 +190,205 @@ impl App {
             _ => {}
         }
 
-        while let Some(result) = self.client.receive() {
-            match result {
-                Ok(event) => match event {
-                    ClientEvent::Connection => {
-                        println!("Connected to {}", self.client.server_address());
-                    },
-                    ClientEvent::Disconnection => {
-                        println!("Disconnected from {}", self.client.server_address());
-                    }
-                    ClientEvent::AssignPawn(local_key) => {
-                        self.pawn_key = Some(local_key);
-                        println!("assign pawn");
-                    }
-                    ClientEvent::UnassignPawn(_) => {
-                        self.pawn_key = None;
-                        println!("unassign pawn");
-                    }
-                    ClientEvent::CreateActor(actor_key) => {
-                        if let Some(actor) = self.client.get_actor(&actor_key) {
-                            match actor {
-                                Actors::WorldActor(world_actor) => {
-                                    println!("got world update at key {}", actor_key);
-                                    self.map = Some(Map::new(*(world_actor.as_ref().borrow().seed.get())));
-                                    println!("new seed: {}", self.map.as_ref().unwrap().seed);
-                                },
-                                _ => {}
-                            }
+        if let Some(client) = &mut self.client {
+            while let Some(result) = client.receive() {
+                match result {
+                    Ok(event) => match event {
+                        ClientEvent::Connection => {
+                            println!("Connected to {}", client.server_address());
+                            // self.change_menu(MenuState::Game);
+                            self.menu_state = MenuState::Game;
+                            self.menu_idx = 0;
+                        },
+                        ClientEvent::Disconnection => {
+                            println!("Disconnected from {}", client.server_address());
+                            // self.change_menu(MenuState::Connect);
+                            self.menu_state = MenuState::Connect;
+                            self.menu_idx = 0;
                         }
-                    }
-                    ClientEvent::Tick => {
-                        if let Some(pawn_key) = self.pawn_key {
-                            if let Some(command) = self.queued_command.take() {
-                                self.client.send_command(pawn_key, &command);
-                            }
+                        ClientEvent::AssignPawn(local_key) => {
+                            self.pawn_key = Some(local_key);
+                            println!("assign pawn");
                         }
-                    }
-                    ClientEvent::Command(pawn_key, command_type) => {
-                        if let Events::KeyCommand(key_command) = command_type {
-                            if let Some(typed_actor) = self.client.get_pawn_mut(&pawn_key) {
-                                println!("{}", pawn_key);
-                                match typed_actor {
-                                    Actors::PointActor(actor) => {
-                                        shared_behaviour::process_command(&key_command, actor);
-                                        self.player_x = *(actor.as_ref().borrow().x.get());
-                                        self.player_y = *(actor.as_ref().borrow().y.get());
+                        ClientEvent::UnassignPawn(_) => {
+                            self.pawn_key = None;
+                            println!("unassign pawn");
+                        }
+                        ClientEvent::CreateActor(actor_key) => {
+                            if let Some(actor) = client.get_actor(&actor_key) {
+                                match actor {
+                                    Actors::WorldActor(world_actor) => {
+                                        println!("got world update at key {}", actor_key);
+                                        self.map = Some(Map::new(*(world_actor.as_ref().borrow().seed.get())));
+                                        println!("new seed: {}", self.map.as_ref().unwrap().seed);
                                     },
                                     _ => {}
                                 }
                             }
                         }
+                        ClientEvent::Tick => {
+                            if let Some(pawn_key) = self.pawn_key {
+                                if let Some(command) = self.queued_command.take() {
+                                    client.send_command(pawn_key, &command);
+                                }
+                            }
+                        }
+                        ClientEvent::Command(pawn_key, command_type) => {
+                            if let Events::KeyCommand(key_command) = command_type {
+                                if let Some(typed_actor) = client.get_pawn_mut(&pawn_key) {
+                                    println!("{}", pawn_key);
+                                    match typed_actor {
+                                        Actors::PointActor(actor) => {
+                                            shared_behaviour::process_command(&key_command, actor);
+                                            self.player_x = *(actor.as_ref().borrow().x.get());
+                                            self.player_y = *(actor.as_ref().borrow().y.get());
+                                        },
+                                        _ => {}
+                                    }
+                                }
+                            }
+                        },
+                        _ => {},
                     },
-                    _ => {},
-                },
-                Err(err) => {
-                    println!("Client Error: {}", err);
+                    Err(err) => {
+                        println!("Client Error: {}", err);
+                    }
                 }
             }
         }
 
-        if self.client.has_connection() {
-            let center_x = self.ss.0.div_floor(&2);
-            let center_y = self.ss.1.div_floor(&2);
+        self.draw_ui(renderer, frame_time);
+    }
 
-            let cam_off_x = self.player_x - center_x;
-            let cam_off_y = self.player_y - center_y;
+    fn draw_game<T: Renderer>(&mut self, renderer: &mut T, frame_time: f32) {
+        if let Some(client) = &mut self.client {
+            if client.has_connection() {
+                let center_x = self.ss.0.div_floor(&2);
+                let center_y = self.ss.1.div_floor(&2);
 
-            self.draw_map(renderer, cam_off_x, cam_off_y);
+                let cam_off_x = self.player_x - center_x;
+                let cam_off_y = self.player_y - center_y;
 
+                self.draw_map(renderer, cam_off_x, cam_off_y);
+
+                renderer.attrset(COLOR_PAIR(7));
+                renderer.plot(center_x, center_y, '@' as chtype);
+
+                self.draw_others(renderer, cam_off_x, cam_off_y);
+            } else {}
+
+            renderer.mvaddstr(0, 0, format!("frametime: {} ({} fps)", frame_time, 1.0 / frame_time));
+            renderer.mvaddstr(1, 0, format!("{},{}", self.ss.0, self.ss.1));
+        } else {}
+    }
+
+    fn draw_button<T: Renderer, U: AsRef<str>>(&mut self, renderer: &mut T, txt: U) -> bool {
+        if self.menu_counter == self.menu_idx {
             renderer.attrset(COLOR_PAIR(7));
-            renderer.plot(center_x, center_y, '@' as chtype);
-
-            self.draw_others(renderer, cam_off_x, cam_off_y);
+            if self.menu_press {
+                self.menu_press = false;
+                return true;
+            }
         } else {
-            renderer.mvaddstr(self.ss.0/2,self.ss.1/2,"NOT CONNECTED");
+            renderer.attrset(COLOR_PAIR(8));
         }
+        renderer.mvaddstr(self.menu_counter as i32 + self.menu_space as i32, 0, txt);
+        self.menu_counter += 1;
+        false
+    }
 
-        renderer.mvaddstr(0, 0, format!("frametime: {} ({} fps)", frame_time, 1.0/frame_time));
-        renderer.mvaddstr(1, 0, format!("{},{}", self.ss.0, self.ss.1));
+    fn draw_label<T: Renderer, U: AsRef<str>>(&mut self, renderer: &mut T, text: U) {
+        renderer.attrset(COLOR_PAIR(8));
+        renderer.mvaddstr(self.menu_counter as i32 + self.menu_space as i32, 0, text);
+    }
+
+    fn draw_input<T: Renderer, U: AsRef<str>>(&mut self, renderer: &mut T, label: U, value: U) -> String {
+        let input_txt;
+        if self.menu_counter == self.menu_idx {
+            renderer.attrset(COLOR_PAIR(7));
+            if self.menu_press {
+                self.menu_press = false;
+                self.menu_eaten = true;
+            }
+            if self.menu_unpress {
+                self.menu_unpress = false;
+            }
+            if self.menu_eaten {
+                input_txt = self.menu_text.as_ref();
+            } else {
+                input_txt = value.as_ref();
+            }
+        } else {
+            renderer.attrset(COLOR_PAIR(8));
+            input_txt = value.as_ref();
+        }
+        renderer.mvaddstr(self.menu_counter as i32, 0, label.as_ref());
+
+        if self.menu_eaten && self.menu_counter == self.menu_idx {
+            renderer.attrset(COLOR_PAIR(7));
+        } else {
+            renderer.attrset(COLOR_PAIR(8));
+        }
+        if input_txt.is_empty() {
+            renderer.mvaddstr(self.menu_counter as i32 + self.menu_space as i32, 1 + label.as_ref().len() as i32, "   ");
+        } else {
+            renderer.mvaddstr(self.menu_counter as i32 + self.menu_space as i32, 1 + label.as_ref().len() as i32, input_txt);
+        }
+        self.menu_counter += 1;
+        input_txt.to_string()
+    }
+
+    fn change_menu(&mut self, new_state: MenuState) {
+        self.menu_state = new_state;
+        self.menu_idx = 0;
+    }
+
+    fn draw_ui<T: Renderer>(&mut self, renderer: &mut T, frame_time: f32) {
+        renderer.erase();
+        match self.menu_state {
+            MenuState::Main => {
+                if self.draw_button(renderer, "CONNECT") {
+                    self.change_menu(MenuState::Connect);
+                }
+                self.draw_button(renderer, "EXIT");
+            }
+            MenuState::Connect => {
+                self.ip = self.draw_input(renderer, "IP:", &self.ip.clone());
+
+                if self.draw_button(renderer, "CONNECT") {
+                    self.connect(self.ip.clone());
+                    self.change_menu(MenuState::Connecting);
+                }
+
+                self.menu_space += 1;
+                if self.draw_button(renderer, "BACK") {
+                    self.change_menu(MenuState::Connect);
+                }
+            }
+            MenuState::Connecting => {
+                if let Some(client) = &self.client {
+                    if client.has_connection() {
+                        //self.change_menu(MenuState::Game);
+                        self.draw_label(renderer, ":)");
+                    } else {
+                        self.draw_label(renderer, "CONNECTING...");
+                        self.menu_space += 1;
+                        if self.draw_button(renderer, "CANCEL") {
+                            self.client = None;
+                            self.menu_state = MenuState::Connect;
+                            self.menu_idx = 0;
+                        }
+                    }
+                }
+            }
+            MenuState::Game => {
+                self.draw_game(renderer, frame_time);
+            }
+        }
+        self.menu_counter = 0;
+        self.menu_space = 0;
+        self.menu_unpress = false;
+        self.menu_press = false;
     }
 
     fn draw_map<T: Renderer>(&mut self, renderer: &mut T, cam_off_x: i32, cam_off_y: i32) {
@@ -226,16 +422,18 @@ impl App {
     }
 
     fn draw_others<T: Renderer>(&mut self, renderer: &mut T, cam_off_x: i32, cam_off_y: i32) {
-        for actor_key in self.client.actor_keys().unwrap() {
-            if actor_key == self.pawn_key.unwrap_or(0) { continue; }
-            if let Some(actor) = self.client.get_actor(&actor_key) {
-                match actor {
-                    Actors::PointActor(point_actor) => {
-                        let x = *(point_actor.as_ref().borrow().x.get());
-                        let y = *(point_actor.as_ref().borrow().y.get());
-                        renderer.plot(x - cam_off_x, y - cam_off_y, 'O');
-                    },
-                    _ => {}
+        if let Some(client) = &mut self.client {
+            for actor_key in client.actor_keys().unwrap() {
+                if actor_key == self.pawn_key.unwrap_or(0) { continue; }
+                if let Some(actor) = client.get_actor(&actor_key) {
+                    match actor {
+                        Actors::PointActor(point_actor) => {
+                            let x = *(point_actor.as_ref().borrow().x.get());
+                            let y = *(point_actor.as_ref().borrow().y.get());
+                            renderer.plot(x - cam_off_x, y - cam_off_y, 'O');
+                        },
+                        _ => {}
+                    }
                 }
             }
         }

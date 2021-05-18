@@ -7,6 +7,7 @@ extern crate num_integer;
 
 pub mod renderer;
 pub mod util;
+pub mod ui;
 
 mod app;
 use app::App;
