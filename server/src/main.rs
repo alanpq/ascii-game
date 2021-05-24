@@ -13,8 +13,7 @@ use smol::io;
 use naia_server::{ActorKey, NaiaServer, ServerAddresses, Random, ServerConfig, ServerEvent, UserKey};
 use log::LevelFilter;
 use ascii_game_shared::{
-    get_shared_config, manifest_load, PointActor, WorldActor, Events, Actors, shared_behaviour,
-    PointActorColor
+    get_shared_config, manifest_load, actors::{PointActor, PointActorColor, WorldActor}, Events, Actors, shared_behaviour,
 };
 use ascii_game_shared::game::map::Map;
 
@@ -39,7 +38,7 @@ fn main() -> io::Result<()> {
 
         let mut server_config = ServerConfig::default();
         server_config.heartbeat_interval = Duration::from_secs(2);
-        server_config.disconnection_timeout_duration = Duration::from_secs(5);
+        server_config.disconnection_timeout_duration = Duration::from_secs(10000);
 
         let mut server = NaiaServer::new(
             server_addresses,
@@ -68,6 +67,9 @@ fn main() -> io::Result<()> {
                 return true;
             },
             Actors::WorldActor(_) => {
+                return true;
+            },
+            Actors::ChatActor(_) => {
                 return true;
             }
         })));
@@ -120,19 +122,21 @@ fn main() -> io::Result<()> {
                                 server.deregister_actor(actor_key);
                             }
                         }
-                        ServerEvent::Command(_, actor_key, command_type) => match command_type {
-                            Events::KeyCommand(key_command) => {
-                                if let Some(typed_actor) = server.get_actor(actor_key) {
-                                    match typed_actor {
-                                        Actors::PointActor(actor) => {
-                                            shared_behaviour::process_command(&key_command, actor);
-                                        },
-                                        _ => {}
-                                    }
+                        ServerEvent::Command(_, actor_key, command_type) => if let Events::KeyCommand(key_command) = command_type {
+                            if let Some(typed_actor) = server.get_actor(actor_key) {
+                                if let Actors::PointActor(actor) = typed_actor {
+                                    shared_behaviour::process_command(&key_command, actor);
                                 }
                             }
-                            _ => {}
                         },
+                        ServerEvent::Event(user_key, event) => if let Events::ChatEvent(chat) = event {
+                            if let Some(user) = server.get_user(&user_key) {
+                                info!("chat received: {}", chat.body.get());
+                                for x in user_to_pawn_map.keys() {
+                                    server.queue_event(x, &chat);
+                                }
+                            }
+                        }
                         ServerEvent::Tick => {
                             server.send_all_updates().await;
                             //info!("tick");

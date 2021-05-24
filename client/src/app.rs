@@ -16,7 +16,7 @@ use std::{
 use naia_client::{ClientConfig, ClientEvent, NaiaClient};
 
 use ascii_game_shared::{
-    get_shared_config, manifest_load, shared_behaviour, events::{AuthEvent,KeyCommand}, Actors, Events,
+    get_shared_config, manifest_load, shared_behaviour, events::{AuthEvent,KeyCommand,ChatEvent}, Actors, Events,
     actors::{PointActorColor},
 };
 use ascii_game_shared::game::map::Map;
@@ -27,6 +27,7 @@ use std::cell::RefCell;
 use std::net::ToSocketAddrs;
 use std::io::empty;
 use bitflags::_core::ops::Not;
+use std::cmp::min;
 
 const SERVER_PORT: u16 = 14191;
 
@@ -53,6 +54,10 @@ pub struct App {
     menu_press: bool,
     menu_unpress: bool,
     menu_text: String,
+
+    chat_open: bool,
+    chat_msg: Option<String>,
+    chat_log: Vec<String>,
 
     debug_keys: DebugFlags,
 
@@ -85,6 +90,10 @@ impl App {
             menu_unpress: false,
             menu_text: String::new(),
 
+            chat_open: false,
+            chat_msg: None,
+            chat_log: Vec::new(),
+
             debug_keys: DebugFlags::KEY.not(),
 
             ip: String::new(),
@@ -115,7 +124,7 @@ impl App {
             .expect("couldn't parse input IP address").next().expect("still couldn't parse hostname");
         let mut client_config = ClientConfig::default();
         client_config.heartbeat_interval = Duration::from_secs(2);
-        client_config.disconnection_timeout_duration = Duration::from_secs(5);
+        client_config.disconnection_timeout_duration = Duration::from_secs(10000);
 
         let auth = Events::AuthEvent(AuthEvent::new("charlie", "12345"));
 
@@ -151,6 +160,10 @@ impl App {
                             self.menu_eaten = false;
                             self.menu_unpress = true;
                         }
+                        if self.chat_open {
+                            self.menu_text.clear();
+                        }
+                        self.chat_open = false;
                     },
                     119 => { // w
                         w = true;
@@ -173,8 +186,17 @@ impl App {
                         }
                     },
                     10 => { // enter
-                        if self.menu_state != MenuState::Game && !self.menu_eaten {
-                            self.menu_press = true;
+                        if self.menu_state != MenuState::Game {
+                            if !self.menu_eaten {
+                                self.menu_press = true;
+                            }
+                        } else {
+                            if self.chat_open {
+                                self.chat_msg = Some(self.menu_text.clone());
+                                self.menu_text.clear();
+                            }
+                            self.chat_open = !self.chat_open;
+                            self.menu_eaten = self.chat_open;
                         }
                     }
                     _ => {},
@@ -189,8 +211,10 @@ impl App {
                             self.menu_text.pop();
                         }
                         10 => { // enter
-                            self.menu_eaten = false;
-                            self.menu_unpress = true;
+                            if !self.chat_open {
+                                self.menu_eaten = false;
+                                self.menu_unpress = true;
+                            }
                         }
                         _ => {
                             self.menu_text.push(chr);
@@ -245,22 +269,30 @@ impl App {
                                 if let Some(command) = self.queued_command.take() {
                                     client.send_command(pawn_key, &command);
                                 }
+                                if let Some(msg) = &mut self.chat_msg {                                                                         info!("sending chat: '{}'", msg);
+                                    let cmd = ChatEvent::new(msg);
+                                    client.send_event(&cmd);
+                                    self.chat_msg = None;
+                                }
                             }
                         }
                         ClientEvent::Command(pawn_key, command_type) => {
                             if let Events::KeyCommand(key_command) = command_type {
                                 if let Some(typed_actor) = client.get_pawn_mut(&pawn_key) {
-                                    match typed_actor {
-                                        Actors::PointActor(actor) => {
-                                            shared_behaviour::process_command(&key_command, actor);
-                                            self.player_x = *(actor.as_ref().borrow().x.get());
-                                            self.player_y = *(actor.as_ref().borrow().y.get());
-                                        },
-                                        _ => {}
+                                    if let Actors::PointActor(actor) = typed_actor {
+                                        shared_behaviour::process_command(&key_command, actor);
+                                        self.player_x = *(actor.as_ref().borrow().x.get());
+                                        self.player_y = *(actor.as_ref().borrow().y.get());
                                     }
                                 }
                             }
                         },
+                        ClientEvent::Event(event) => {
+                            if let Events::ChatEvent(event) = event {
+                                info!("chat received: '{}'", event.body.get());
+                                self.chat_log.push(event.body.get().clone());
+                            }
+                        }
                         _ => {},
                     },
                     Err(err) => {
@@ -396,6 +428,18 @@ impl App {
             }
             MenuState::Game => {
                 self.draw_game(renderer, frame_time);
+                renderer.mvaddstr(self.ss.1-1, 0, &self.menu_text);
+
+                let len = self.chat_log.len();
+                if len > 0 {
+                    let mut j = 0;
+                    for i in len - min(len, 10)..len {
+                        if let Some(str) = self.chat_log.get(i) {
+                            renderer.mvaddstr(self.ss.1 - 11 + j, 0, str);
+                            j+=(str.len() as i32).div_ceil(&self.ss.0);
+                        }
+                    }
+                }
             }
         }
         self.menu_counter = 0;
