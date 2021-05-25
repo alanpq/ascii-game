@@ -10,6 +10,8 @@ extern crate num_integer;
 #[macro_use]
 extern crate glium;
 
+extern crate image;
+
 pub mod renderer;
 pub mod util;
 pub mod ui;
@@ -26,8 +28,8 @@ use glium::{glutin, Surface};
 fn main() {
     SimpleLogger::new().with_level(LevelFilter::Info).init().unwrap();
     let mut renderer = GlRenderer::new();
-    renderer.init();
     let mut app = App::new(&renderer);
+    renderer.init();
 
     // renderer.run();
 }

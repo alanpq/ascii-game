@@ -23,6 +23,7 @@ naia-client = { version = "0.5.0", features = [ "mquad" ] }
 ascii-game-shared = { path = "../shared" }
 
 glium = "*"
+image = "*"
 
 [dependencies.pancurses]
 version = "0.16"
