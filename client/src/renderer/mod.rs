@@ -1,4 +1,5 @@
 pub(crate) mod curses;
+pub mod glium;
 pub mod drawer;
 
 use pancurses::{ToChtype, Window, chtype, Input};

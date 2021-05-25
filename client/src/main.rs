@@ -7,6 +7,9 @@ extern crate cfg_if;
 extern crate pancurses;
 extern crate num_integer;
 
+#[macro_use]
+extern crate glium;
+
 pub mod renderer;
 pub mod util;
 pub mod ui;
@@ -17,14 +20,14 @@ use crate::renderer::curses::CursesRenderer;
 use crate::renderer::Renderer;
 use simple_logger::SimpleLogger;
 use log::LevelFilter;
+use crate::renderer::glium::GlRenderer;
+use glium::{glutin, Surface};
 
 fn main() {
     SimpleLogger::new().with_level(LevelFilter::Info).init().unwrap();
-    let mut renderer = CursesRenderer::new();
+    let mut renderer = GlRenderer::new();
     renderer.init();
     let mut app = App::new(&renderer);
 
-    loop {
-        app.update(&mut renderer);
-    }
+    // renderer.run();
 }
