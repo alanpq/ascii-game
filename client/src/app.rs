@@ -1,6 +1,6 @@
 use pancurses::{ALL_MOUSE_EVENTS, Window, endwin, newwin, getmouse, initscr, mousemask, Input, resize_term, REPORT_MOUSE_POSITION, ToChtype, Attribute, curs_set, cbreak, noecho, chtype, BUTTON1_RELEASED, COLOR_BLACK, COLOR_PAIR, COLOR_GREEN};
 use crate::renderer::curses::CursesRenderer;
-use crate::renderer::{Renderer, drawer::Drawer};
+use crate::renderer::{Renderer, drawer::Drawer, Event};
 use crate::ui::{MenuState};
 
 use num_integer::Integer;
@@ -23,11 +23,13 @@ use ascii_game_shared::game::map::Map;
 use ascii_game_shared::game::map::{CHUNK_SIZE, CHUNK_SIZE_I32, Tile};
 use std::collections::HashMap;
 use std::borrow::BorrowMut;
-use std::cell::RefCell;
+use std::cell::{RefCell, RefMut};
 use std::net::ToSocketAddrs;
 use std::io::empty;
 use bitflags::_core::ops::Not;
 use std::cmp::min;
+use std::rc::Rc;
+use glium::{Frame, Display};
 
 const SERVER_PORT: u16 = 14191;
 
@@ -138,94 +140,88 @@ impl App {
         self.client = Some(client);
     }
 
-    pub fn update<T: Renderer>(&mut self, renderer: &mut T) {
+    pub fn update<T: Renderer>(&mut self, display: Rc<Display>, frame: Rc<RefCell<Frame>>, renderer_ref: Rc<RefCell<T>>, event: Option<Event>) {
+        let renderer = (*renderer_ref).borrow();
         let frame_time = self.fps_counter.tick();
-        match renderer.getch() {
-            Some(Input::KeyResize) => {
-                resize_term(0, 0); // TODO: abstract this away
-                self.ss = renderer.dimensions();
-            },
-            Some(Input::Character(chr)) => {
-                if self.debug_keys & DebugFlags::KEY == DebugFlags::KEY {
-                    info!("chr {} -> {}", chr, chr as u32);
+        if let Some(Event::Character(chr)) = event {
+            if self.debug_keys & DebugFlags::KEY == DebugFlags::KEY {
+                info!("chr {} -> {}", chr, chr as u32);
+            }
+            let mut w = false;
+            let mut s = false;
+            let mut a = false;
+            let mut d = false;
+            match chr as u32 {
+                27 => { // escape
+                    self.paused = !self.paused;
+                    if self.menu_eaten {
+                        self.menu_eaten = false;
+                        self.menu_unpress = true;
+                    }
+                    if self.chat_open {
+                        self.menu_text.clear();
+                    }
+                    self.chat_open = false;
+                },
+                119 => { // w
+                    w = true;
+                },
+                115 => { // s
+                    s = true;
+                },
+                97 => { // a
+                    a = true;
+                },
+                100 => { // d
+                    d = true;
+                },
+                107 => {
+                    self.debug_keys.toggle(DebugFlags::KEY);
+                },
+                32 => { // space
+                    if self.menu_state != MenuState::Game && !self.menu_eaten {
+                        self.menu_press = true;
+                    }
+                },
+                10 => { // enter
+                    if self.menu_state != MenuState::Game {
+                        if !self.menu_eaten {
+                            self.menu_press = true;
+                        }
+                    } else {
+                        if self.chat_open {
+                            self.chat_msg = Some(self.menu_text.clone());
+                            self.menu_text.clear();
+                        }
+                        self.chat_open = !self.chat_open;
+                        self.menu_eaten = self.chat_open;
+                    }
                 }
-                let mut w = false;
-                let mut s = false;
-                let mut a = false;
-                let mut d = false;
+                _ => {},
+            }
+            if self.menu_state != MenuState::Game && !self.menu_eaten {
+                self.menu_idx = self.menu_idx.saturating_add(s as u8);
+                self.menu_idx = self.menu_idx.saturating_sub(w as u8);
+            }
+            if self.menu_eaten {
                 match chr as u32 {
-                    27 => { // escape
-                        self.paused = !self.paused;
-                        if self.menu_eaten {
+                    8 => { // backspace
+                        self.menu_text.pop();
+                    }
+                    10 => { // enter
+                        if !self.chat_open {
                             self.menu_eaten = false;
                             self.menu_unpress = true;
                         }
-                        if self.chat_open {
-                            self.menu_text.clear();
-                        }
-                        self.chat_open = false;
-                    },
-                    119 => { // w
-                        w = true;
-                    },
-                    115 => { // s
-                        s = true;
-                    },
-                    97 => { // a
-                        a = true;
-                    },
-                    100 => { // d
-                        d = true;
-                    },
-                    107 => {
-                        self.debug_keys.toggle(DebugFlags::KEY);
-                    },
-                    32 => { // space
-                        if self.menu_state != MenuState::Game && !self.menu_eaten {
-                            self.menu_press = true;
-                        }
-                    },
-                    10 => { // enter
-                        if self.menu_state != MenuState::Game {
-                            if !self.menu_eaten {
-                                self.menu_press = true;
-                            }
-                        } else {
-                            if self.chat_open {
-                                self.chat_msg = Some(self.menu_text.clone());
-                                self.menu_text.clear();
-                            }
-                            self.chat_open = !self.chat_open;
-                            self.menu_eaten = self.chat_open;
-                        }
                     }
-                    _ => {},
-                }
-                if self.menu_state != MenuState::Game && !self.menu_eaten {
-                    self.menu_idx = self.menu_idx.saturating_add(s as u8);
-                    self.menu_idx = self.menu_idx.saturating_sub(w as u8);
-                }
-                if self.menu_eaten {
-                    match chr as u32 {
-                        8 => { // backspace
-                            self.menu_text.pop();
-                        }
-                        10 => { // enter
-                            if !self.chat_open {
-                                self.menu_eaten = false;
-                                self.menu_unpress = true;
-                            }
-                        }
-                        _ => {
-                            self.menu_text.push(chr);
-                        }
+                    _ => {
+                        self.menu_text.push(chr);
                     }
                 }
-                if w || s || a || d {
-                    self.queued_command = Some(KeyCommand::new(w,s,a,d));
-                }
-            },
-            _ => {}
+            }
+            if w || s || a || d {
+                self.queued_command = Some(KeyCommand::new(w,s,a,d));
+            }
         }
 
         if let Some(client) = &mut self.client {
@@ -302,10 +298,14 @@ impl App {
             }
         }
 
-        self.draw_ui(renderer, frame_time);
+        self.draw_ui(display.clone(), frame.clone(), renderer_ref.clone(), frame_time);
+        // renderer.plot(display.clone(), frame.clone(), 0, 0, 'a');
+
+        // self.frame.take().unwrap().finish().unwrap();
     }
 
-    fn draw_game<T: Renderer>(&mut self, renderer: &mut T, frame_time: f32) {
+    fn draw_game<T: Renderer>(&mut self, display: Rc<Display>, frame: Rc<RefCell<Frame>>, renderer_ref: Rc<RefCell<T>>, frame_time: f32) {
+        let renderer = (*renderer_ref).borrow();
         if let Some(client) = &mut self.client {
             if client.has_connection() {
                 let center_x = self.ss.0.div_floor(&2);
@@ -314,20 +314,21 @@ impl App {
                 let cam_off_x = self.player_x - center_x;
                 let cam_off_y = self.player_y - center_y;
 
-                self.draw_map(renderer, cam_off_x, cam_off_y);
+                self.draw_map(display.clone(), frame.clone(), renderer_ref.clone(), cam_off_x, cam_off_y);
 
                 renderer.attrset(COLOR_PAIR(7));
-                renderer.plot(center_x, center_y, '@' as chtype);
+                renderer.plot(display.clone(),frame.clone(), center_x, center_y, '@' as chtype);
 
-                self.draw_others(renderer, cam_off_x, cam_off_y);
+                self.draw_others(display.clone(), frame.clone(),renderer_ref.clone(), cam_off_x, cam_off_y);
             } else {}
 
-            renderer.mvaddstr(0, 0, format!("frametime: {} ({} fps)", frame_time, 1.0 / frame_time));
-            renderer.mvaddstr(1, 0, format!("{},{}", self.ss.0, self.ss.1));
+            renderer.mvaddstr(display.clone(),frame.clone(),0, 0, format!("frametime: {} ({} fps)", frame_time, 1.0 / frame_time));
+            renderer.mvaddstr(display.clone(),frame.clone(),1, 0, format!("{},{}", self.ss.0, self.ss.1));
         } else {}
     }
 
-    fn draw_button<T: Renderer, U: AsRef<str>>(&mut self, renderer: &mut T, txt: U) -> bool {
+    fn draw_button<T: Renderer, U: AsRef<str>>(&mut self, display: Rc<Display>, frame: Rc<RefCell<Frame>>, renderer_ref: Rc<RefCell<T>>, txt: U) -> bool {
+        let renderer = (*renderer_ref).borrow();
         if self.menu_counter == self.menu_idx {
             renderer.attrset(COLOR_PAIR(7));
             if self.menu_press {
@@ -337,17 +338,19 @@ impl App {
         } else {
             renderer.attrset(COLOR_PAIR(8));
         }
-        renderer.mvaddstr(self.menu_counter as i32 + self.menu_space as i32, 0, txt);
+        renderer.mvaddstr(display.clone(),frame.clone(), self.menu_counter as i32 + self.menu_space as i32, 0, txt);
         self.menu_counter += 1;
         false
     }
 
-    fn draw_label<T: Renderer, U: AsRef<str>>(&mut self, renderer: &mut T, text: U) {
+    fn draw_label<T: Renderer, U: AsRef<str>>(&mut self, display: Rc<Display>, frame: Rc<RefCell<Frame>>,  renderer_ref: Rc<RefCell<T>>, text: U) {
+        let renderer = (*renderer_ref).borrow();
         renderer.attrset(COLOR_PAIR(8));
-        renderer.mvaddstr(self.menu_counter as i32 + self.menu_space as i32, 0, text);
+        renderer.mvaddstr(display.clone(),frame.clone(), self.menu_counter as i32 + self.menu_space as i32, 0, text);
     }
 
-    fn draw_input<T: Renderer, U: AsRef<str>>(&mut self, renderer: &mut T, label: U, value: U) -> String {
+    fn draw_input<T: Renderer, U: AsRef<str>>(&mut self, display: Rc<Display>, frame: Rc<RefCell<Frame>>,  renderer_ref: Rc<RefCell<T>>, label: U, value: U) -> String {
+        let renderer = (*renderer_ref).borrow();
         let input_txt;
         if self.menu_counter == self.menu_idx {
             renderer.attrset(COLOR_PAIR(7));
@@ -367,7 +370,7 @@ impl App {
             renderer.attrset(COLOR_PAIR(8));
             input_txt = value.as_ref();
         }
-        renderer.mvaddstr(self.menu_counter as i32, 0, label.as_ref());
+        renderer.mvaddstr(display.clone(),frame.clone(), self.menu_counter as i32, 0, label.as_ref());
 
         if self.menu_eaten && self.menu_counter == self.menu_idx {
             renderer.attrset(COLOR_PAIR(7));
@@ -375,9 +378,9 @@ impl App {
             renderer.attrset(COLOR_PAIR(8));
         }
         if input_txt.is_empty() {
-            renderer.mvaddstr(self.menu_counter as i32 + self.menu_space as i32, 1 + label.as_ref().len() as i32, "   ");
+            renderer.mvaddstr(display.clone(),frame.clone(), self.menu_counter as i32 + self.menu_space as i32, 1 + label.as_ref().len() as i32, "   ");
         } else {
-            renderer.mvaddstr(self.menu_counter as i32 + self.menu_space as i32, 1 + label.as_ref().len() as i32, input_txt);
+            renderer.mvaddstr(display.clone(),frame.clone(), self.menu_counter as i32 + self.menu_space as i32, 1 + label.as_ref().len() as i32, input_txt);
         }
         self.menu_counter += 1;
         input_txt.to_string()
@@ -388,25 +391,26 @@ impl App {
         self.menu_idx = 0;
     }
 
-    fn draw_ui<T: Renderer>(&mut self, renderer: &mut T, frame_time: f32) {
+    fn draw_ui<T: Renderer>(&mut self, display: Rc<Display>, frame: Rc<RefCell<Frame>>,  renderer_ref: Rc<RefCell<T>>, frame_time: f32) {
+        let renderer = (*renderer_ref).borrow();
         renderer.erase();
         match self.menu_state {
             MenuState::Main => {
-                if self.draw_button(renderer, "CONNECT") {
+                if self.draw_button(display.clone(),frame.clone(),renderer_ref.clone(), "CONNECT") {
                     self.change_menu(MenuState::Connect);
                 }
-                self.draw_button(renderer, "EXIT");
+                self.draw_button(display.clone(),frame.clone(),renderer_ref.clone(), "EXIT");
             }
             MenuState::Connect => {
-                self.ip = self.draw_input(renderer, "IP:", &self.ip.clone());
+                self.ip = self.draw_input(display.clone(),frame.clone(),renderer_ref.clone(), "IP:", &self.ip.clone());
 
-                if self.draw_button(renderer, "CONNECT") {
+                if self.draw_button(display.clone(),frame.clone(),renderer_ref.clone(), "CONNECT") {
                     self.connect(self.ip.clone());
                     self.change_menu(MenuState::Connecting);
                 }
 
                 self.menu_space += 1;
-                if self.draw_button(renderer, "BACK") {
+                if self.draw_button(display.clone(),frame.clone(),renderer_ref.clone(), "BACK") {
                     self.change_menu(MenuState::Connect);
                 }
             }
@@ -414,11 +418,11 @@ impl App {
                 if let Some(client) = &self.client {
                     if client.has_connection() {
                         //self.change_menu(MenuState::Game);
-                        self.draw_label(renderer, ":)");
+                        self.draw_label(display.clone(),frame.clone(), renderer_ref.clone(), ":)");
                     } else {
-                        self.draw_label(renderer, "CONNECTING...");
+                        self.draw_label(display.clone(),frame.clone(), renderer_ref.clone(), "CONNECTING...");
                         self.menu_space += 1;
-                        if self.draw_button(renderer, "CANCEL") {
+                        if self.draw_button(display.clone(),frame.clone(), renderer_ref.clone(), "CANCEL") {
                             self.client = None;
                             self.menu_state = MenuState::Connect;
                             self.menu_idx = 0;
@@ -427,15 +431,15 @@ impl App {
                 }
             }
             MenuState::Game => {
-                self.draw_game(renderer, frame_time);
-                renderer.mvaddstr(self.ss.1-1, 0, &self.menu_text);
+                self.draw_game(display.clone(),frame.clone(), renderer_ref.clone(), frame_time);
+                renderer.mvaddstr(display.clone(),frame.clone(), self.ss.1-1, 0, &self.menu_text);
 
                 let len = self.chat_log.len();
                 if len > 0 {
                     let mut j = 0;
                     for i in len - min(len, 10)..len {
                         if let Some(str) = self.chat_log.get(i) {
-                            renderer.mvaddstr(self.ss.1 - 11 + j, 0, str);
+                            renderer.mvaddstr(display.clone(),frame.clone(), self.ss.1 - 11 + j, 0, str);
                             j+=(str.len() as i32).div_ceil(&self.ss.0);
                         }
                     }
@@ -448,7 +452,8 @@ impl App {
         self.menu_press = false;
     }
 
-    fn draw_map<T: Renderer>(&mut self, renderer: &mut T, cam_off_x: i32, cam_off_y: i32) {
+    fn draw_map<T: Renderer>(&mut self, display: Rc<Display>, frame: Rc<RefCell<Frame>>, renderer_ref: Rc<RefCell<T>>, cam_off_x: i32, cam_off_y: i32) {
+        let renderer = (*renderer_ref).borrow();
         if let Some(map) = &mut self.map {
             let start_x = cam_off_x.div_floor(&CHUNK_SIZE_I32);
             let start_y = cam_off_y.div_floor(&CHUNK_SIZE_I32);
@@ -470,7 +475,7 @@ impl App {
                                     renderer.attrset(COLOR_PAIR(2));
                                 },
                             }
-                            renderer.plot(i * CHUNK_SIZE_I32 + x as i32 - cam_off_x, j * CHUNK_SIZE_I32 + y as i32 - cam_off_y, chr);
+                            renderer.plot(display.clone(),frame.clone(), i * CHUNK_SIZE_I32 + x as i32 - cam_off_x, j * CHUNK_SIZE_I32 + y as i32 - cam_off_y, chr);
                         }
                     }
                 }
@@ -478,7 +483,8 @@ impl App {
         }
     }
 
-    fn draw_others<T: Renderer>(&mut self, renderer: &mut T, cam_off_x: i32, cam_off_y: i32) {
+    fn draw_others<T: Renderer>(&mut self, display: Rc<Display>, frame: Rc<RefCell<Frame>>,  renderer_ref: Rc<RefCell<T>>, cam_off_x: i32, cam_off_y: i32) {
+        let renderer = (*renderer_ref).borrow();
         if let Some(client) = &mut self.client {
             for actor_key in client.actor_keys().unwrap() {
                 if actor_key == self.pawn_key.unwrap_or(0) { continue; }
@@ -487,7 +493,7 @@ impl App {
                         Actors::PointActor(point_actor) => {
                             let x = *(point_actor.as_ref().borrow().x.get());
                             let y = *(point_actor.as_ref().borrow().y.get());
-                            renderer.plot(x - cam_off_x, y - cam_off_y, 'O');
+                            renderer.plot(display.clone(),frame.clone(), x - cam_off_x, y - cam_off_y, 'O');
                         },
                         _ => {}
                     }

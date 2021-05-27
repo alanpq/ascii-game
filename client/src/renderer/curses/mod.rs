@@ -1,5 +1,8 @@
-use crate::renderer::Renderer;
+use crate::renderer::{Renderer, Event};
 use pancurses::{ALL_MOUSE_EVENTS, Window, endwin, newwin, getmouse, initscr, mousemask, Input, resize_term, REPORT_MOUSE_POSITION, ToChtype, Attribute, curs_set, cbreak, noecho, chtype, mouseinterval, has_colors, start_color, init_pair, COLOR_BLACK, COLOR_RED, COLOR_BLUE, COLOR_GREEN, COLOR_CYAN, COLOR_MAGENTA, COLOR_YELLOW, COLOR_WHITE};
+use glium::{Frame, Display};
+use std::rc::Rc;
+use std::cell::RefCell;
 
 pub struct CursesRenderer {
     pub window: Window,
@@ -27,7 +30,7 @@ impl Renderer for CursesRenderer {
         (self.window.get_max_x(), self.window.get_max_y())
     }
 
-    fn init(&mut self) {
+    fn init(&mut self, display: &Display) { // TODO: make display generic
         cbreak();
         noecho();
         curs_set(0);
@@ -54,7 +57,7 @@ impl Renderer for CursesRenderer {
         endwin();
     }
 
-    fn plot<T: ToChtype>(&self, x: i32, y: i32, chr: T) {
+    fn plot<T: ToChtype>(&self, display: Rc<Display>, frame: Rc<RefCell<Frame>>, x: i32, y: i32, chr: T) {
         if x < 0 || y < 0 { return; }
         self.window.mvaddch(y, x, chr);
     }
@@ -63,8 +66,11 @@ impl Renderer for CursesRenderer {
         self.window.erase();
     }
 
-    fn getch(&self) -> Option<Input> {
-        self.window.getch()
+    fn getch(&self) -> Option<Event> {
+        return match self.window.getch() {
+            Some(Input::Character(char)) => Some(Event::Character(char)),
+            _ => None
+        }
     }
 
     fn printw<T: AsRef<str>>(&self, string: T) -> i32 {
@@ -75,7 +81,7 @@ impl Renderer for CursesRenderer {
         self.window.mvaddch(y, x, ch)
     }
 
-    fn mvaddstr<T: AsRef<str>>(&self, y: i32, x: i32, string: T) -> i32 {
+    fn mvaddstr<T: AsRef<str>>(&self, display: Rc<Display>,  frame: Rc<RefCell<Frame>>, y: i32, x: i32, string: T) -> i32 {
         self.window.mvaddstr(y, x, string)
     }
 

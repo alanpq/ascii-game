@@ -22,14 +22,22 @@ use crate::renderer::curses::CursesRenderer;
 use crate::renderer::Renderer;
 use simple_logger::SimpleLogger;
 use log::LevelFilter;
-use crate::renderer::glium::GlRenderer;
+use crate::renderer::opengl::GlRenderer;
 use glium::{glutin, Surface};
+use std::cell::RefCell;
+use std::rc::Rc;
+use crate::renderer::opengl::context::GlContext;
 
 fn main() {
     SimpleLogger::new().with_level(LevelFilter::Info).init().unwrap();
+    let mut context = GlContext::new();
     let mut renderer = GlRenderer::new();
+
     let mut app = App::new(&renderer);
-    renderer.init();
+    let renderer_ref = Rc::new(RefCell::new(renderer));
+    context.run(renderer_ref.clone(), |display, frame, event| {
+        app.update(display, frame, renderer_ref.clone(), event);
+    });
 
     // renderer.run();
 }
