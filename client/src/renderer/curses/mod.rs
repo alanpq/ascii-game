@@ -26,7 +26,7 @@ impl Renderer for CursesRenderer {
         }
     }
 
-    fn dimensions(&self) -> (i32, i32) {
+    fn dimensions(&self, display: &Display) -> (i32, i32) {
         (self.window.get_max_x(), self.window.get_max_y())
     }
 

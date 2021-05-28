@@ -100,7 +100,7 @@ impl App {
 
             ip: String::new(),
 
-            ss: renderer.dimensions(),
+            ss: (0,0),
             fps_counter: FpsCounter::new(),
             paused: false,
         }
