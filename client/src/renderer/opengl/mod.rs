@@ -68,7 +68,7 @@ impl GlRenderer {
         // let dims = self.dimensions();
         let uniforms = uniform! {
             matrix: self.view_matrix,
-            translate: Self::translation_matrix(x as f32 + 0.5, y as f32 + 0.5), // TODO: precompute these matrices
+            translate: Self::translation_matrix(x as f32 + 0.5, y as f32 + 0.5),
             tex: self.char_tex.as_ref().unwrap(),
             u_idx: ((ch as u32) - 33) as f32,
             u_rows: 16.0f32,
@@ -111,6 +111,10 @@ impl Renderer for GlRenderer {
                 [0.0, 0.0, 0.0, 1.0f32]
             ],
         }
+    }
+
+    fn resize(&mut self, display: &Display) {
+        self.view_matrix = self.view_matrix(display);
     }
 
     fn dimensions(&self, display: &Display) -> (i32, i32) {

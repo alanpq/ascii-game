@@ -43,6 +43,7 @@ impl GlContext {
                         //self.draw(display.clone().unwrap(), &vertex_buffer, &index_buffer, &program, &char_texture);
                         // let dims = self.dimensions();
                         // info!("{}, {}", dims.0, dims.1);
+                        event_out = Some(renderer::Event::WindowResize);
                         ControlFlow::Poll
                     },
                     WindowEvent::KeyboardInput {input, ..} => {

@@ -141,87 +141,92 @@ impl App {
     }
 
     pub fn update<T: Renderer>(&mut self, display: Rc<Display>, frame: Rc<RefCell<Frame>>, renderer_ref: Rc<RefCell<T>>, event: Option<Event>) {
-        let renderer = (*renderer_ref).borrow();
         let frame_time = self.fps_counter.tick();
-        if let Some(Event::Character(chr)) = event {
-            if self.debug_keys & DebugFlags::KEY == DebugFlags::KEY {
-                info!("chr {} -> {}", chr, chr as u32);
-            }
-            let mut w = false;
-            let mut s = false;
-            let mut a = false;
-            let mut d = false;
-            match chr as u32 {
-                27 => { // escape
-                    self.paused = !self.paused;
-                    if self.menu_eaten {
-                        self.menu_eaten = false;
-                        self.menu_unpress = true;
-                    }
-                    if self.chat_open {
-                        self.menu_text.clear();
-                    }
-                    self.chat_open = false;
-                },
-                119 => { // w
-                    w = true;
-                },
-                115 => { // s
-                    s = true;
-                },
-                97 => { // a
-                    a = true;
-                },
-                100 => { // d
-                    d = true;
-                },
-                107 => {
-                    self.debug_keys.toggle(DebugFlags::KEY);
-                },
-                32 => { // space
-                    if self.menu_state != MenuState::Game && !self.menu_eaten {
-                        self.menu_press = true;
-                    }
-                },
-                10 => { // enter
-                    if self.menu_state != MenuState::Game {
-                        if !self.menu_eaten {
-                            self.menu_press = true;
-                        }
-                    } else {
-                        if self.chat_open {
-                            self.chat_msg = Some(self.menu_text.clone());
-                            self.menu_text.clear();
-                        }
-                        self.chat_open = !self.chat_open;
-                        self.menu_eaten = self.chat_open;
-                    }
+        match event {
+            Some(Event::Character(chr)) => {
+                if self.debug_keys & DebugFlags::KEY == DebugFlags::KEY {
+                    info!("chr {} -> {}", chr, chr as u32);
                 }
-                _ => {},
-            }
-            if self.menu_state != MenuState::Game && !self.menu_eaten {
-                self.menu_idx = self.menu_idx.saturating_add(s as u8);
-                self.menu_idx = self.menu_idx.saturating_sub(w as u8);
-            }
-            if self.menu_eaten {
+                let mut w = false;
+                let mut s = false;
+                let mut a = false;
+                let mut d = false;
                 match chr as u32 {
-                    8 => { // backspace
-                        self.menu_text.pop();
-                    }
-                    10 => { // enter
-                        if !self.chat_open {
+                    27 => { // escape
+                        self.paused = !self.paused;
+                        if self.menu_eaten {
                             self.menu_eaten = false;
                             self.menu_unpress = true;
                         }
+                        if self.chat_open {
+                            self.menu_text.clear();
+                        }
+                        self.chat_open = false;
+                    },
+                    119 => { // w
+                        w = true;
+                    },
+                    115 => { // s
+                        s = true;
+                    },
+                    97 => { // a
+                        a = true;
+                    },
+                    100 => { // d
+                        d = true;
+                    },
+                    107 => {
+                        self.debug_keys.toggle(DebugFlags::KEY);
+                    },
+                    32 => { // space
+                        if self.menu_state != MenuState::Game && !self.menu_eaten {
+                            self.menu_press = true;
+                        }
+                    },
+                    10 => { // enter
+                        if self.menu_state != MenuState::Game {
+                            if !self.menu_eaten {
+                                self.menu_press = true;
+                            }
+                        } else {
+                            if self.chat_open {
+                                self.chat_msg = Some(self.menu_text.clone());
+                                self.menu_text.clear();
+                            }
+                            self.chat_open = !self.chat_open;
+                            self.menu_eaten = self.chat_open;
+                        }
                     }
-                    _ => {
-                        self.menu_text.push(chr);
+                    _ => {},
+                }
+                if self.menu_state != MenuState::Game && !self.menu_eaten {
+                    self.menu_idx = self.menu_idx.saturating_add(s as u8);
+                    self.menu_idx = self.menu_idx.saturating_sub(w as u8);
+                }
+                if self.menu_eaten {
+                    match chr as u32 {
+                        8 => { // backspace
+                            self.menu_text.pop();
+                        }
+                        10 => { // enter
+                            if !self.chat_open {
+                                self.menu_eaten = false;
+                                self.menu_unpress = true;
+                            }
+                        }
+                        _ => {
+                            self.menu_text.push(chr);
+                        }
                     }
                 }
+                if w || s || a || d {
+                    self.queued_command = Some(KeyCommand::new(w, s, a, d));
+                }
+            },
+            Some(Event::WindowResize) => {
+                (*renderer_ref).borrow_mut().resize(display.as_ref());
             }
-            if w || s || a || d {
-                self.queued_command = Some(KeyCommand::new(w,s,a,d));
-            }
+            _ => {},
         }
 
         if let Some(client) = &mut self.client {

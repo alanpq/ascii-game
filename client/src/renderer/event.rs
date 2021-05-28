@@ -1,3 +1,4 @@
 pub enum Event {
-    Character(char)
+    Character(char),
+    WindowResize,
 }

@@ -14,6 +14,7 @@ pub trait Renderer {
     fn new() -> Self;
 
     //fn frame_buffer(&self) -> Frame;
+    fn resize(&mut self, display: &Display);
     fn dimensions(&self, display: &Display) -> (i32, i32);
 
     fn init(&mut self, display: &Display);
