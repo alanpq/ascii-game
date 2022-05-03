@@ -142,6 +142,17 @@ impl App {
 
     pub fn update<T: Renderer>(&mut self, display: Rc<Display>, frame: Rc<RefCell<Frame>>, renderer_ref: Rc<RefCell<T>>, event: Option<Event>) {
         let frame_time = self.fps_counter.tick();
+
+        self.handle_renderer_event(&display, &renderer_ref, event);
+        self.update_client();
+
+        self.draw_ui(display.clone(), frame.clone(), renderer_ref.clone(), frame_time);
+        // renderer.plot(display.clone(), frame.clone(), 0, 0, 'a');
+
+        // self.frame.take().unwrap().finish().unwrap();
+    }
+
+    fn handle_renderer_event<T: Renderer>(&mut self, display: &Rc<Display>, mut renderer_ref: &Rc<RefCell<T>>, event: Option<Event>) {
         match event {
             Some(Event::Character(chr)) => {
                 if self.debug_keys & DebugFlags::KEY == DebugFlags::KEY {
@@ -228,7 +239,9 @@ impl App {
             }
             _ => {},
         }
+    }
 
+    fn update_client(&mut self) {
         if let Some(client) = &mut self.client {
             while let Some(result) = client.receive() {
                 match result {
@@ -270,7 +283,8 @@ impl App {
                                 if let Some(command) = self.queued_command.take() {
                                     client.send_command(pawn_key, &command);
                                 }
-                                if let Some(msg) = &mut self.chat_msg {                                                                         info!("sending chat: '{}'", msg);
+                                if let Some(msg) = &mut self.chat_msg {
+                                    info!("sending chat: '{}'", msg);
                                     let cmd = ChatEvent::new(msg);
                                     client.send_event(&cmd);
                                     self.chat_msg = None;
@@ -302,11 +316,6 @@ impl App {
                 }
             }
         }
-
-        self.draw_ui(display.clone(), frame.clone(), renderer_ref.clone(), frame_time);
-        // renderer.plot(display.clone(), frame.clone(), 0, 0, 'a');
-
-        // self.frame.take().unwrap().finish().unwrap();
     }
 
     fn draw_game<T: Renderer>(&mut self, display: Rc<Display>, frame: Rc<RefCell<Frame>>, renderer_ref: Rc<RefCell<T>>, frame_time: f32) {
