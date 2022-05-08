@@ -1,6 +1,20 @@
-[workspace]
-members = [
-    "client",
-    "server",
-    "shared"
-]
+[package]
+name = "ascii-game"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+bevy = "0.7"
+bevy_ascii_terminal = "0.9.1"
+bevy_tiled_camera = "0.3.1"
+rand = "0.8.4"
+
+# Enable only a small amount of optimization in debug mode
+[profile.dev]
+opt-level = 1
+
+# Enable high optimizations for dependencies (incl. Bevy), but not for our code:
+[profile.dev.package."*"]
+opt-level = 3
